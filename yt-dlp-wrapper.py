@@ -10,91 +10,70 @@ def run(cmd: List[str]) -> str:
     return subprocess.check_output(cmd, text=True)
 
 
-def get_formats(url: str) -> List[Dict]:
-    """
-    Uses yt-dlp to get structured JSON info for the video
-    """
+def get_video_info(url: str) -> Dict:
     output = run(["yt-dlp", "-J", url])
-    data = json.loads(output)
-    return data["formats"]
+    return json.loads(output)
+
+
+def get_video_formats(info: Dict) -> List[Dict]:
+    return [
+        f for f in info["formats"]
+        if f.get("vcodec") != "none" and f.get("height")
+    ]
+
+
+def group_by_resolution(formats: List[Dict]) -> Dict[int, List[Dict]]:
+    resolutions = {}
+    for f in formats:
+        h = f["height"]
+        resolutions.setdefault(h, []).append(f)
+    return resolutions
 
 
 def pick_smallest(formats: List[Dict]) -> Optional[Dict]:
     with_size = [f for f in formats if f.get("filesize")]
-    return min(with_size, key=lambda f: f["filesize"], default=None)
+    if not with_size:
+        return None
+    return min(with_size, key=lambda f: f["filesize"])
 
 
-def find_resolution_format(formats: List[Dict], target_height: int) -> Optional[str]:
-    """
-    Pick the format closest to the requested height.
-    If no exact height match, try matching by typical width for the resolution.
-    """
-    # common width fallbacks for standard resolutions
-    height_to_width = {720: 1280, 1080: 1920, 2160: 3840}
+def handle_dynamic_resolution_download(url: str) -> None:
+    info = get_video_info(url)
+    formats = get_video_formats(info)
 
-    video_formats = [f for f in formats if f.get("vcodec") != "none"]
+    if not formats:
+        print("No video formats found.")
+        sys.exit(1)
 
-    # 1) format_note contains target height (e.g., '1080p')
-    candidates = [f for f in video_formats if f.get("format_note") and str(target_height) in f["format_note"]]
-    chosen = pick_smallest(candidates)
-    if chosen:
-        return chosen["format_id"]
+    grouped = group_by_resolution(formats)
 
-    # 2) resolution height match
-    candidates = [f for f in video_formats if f.get("height") == target_height]
-    chosen = pick_smallest(candidates)
-    if chosen:
-        return chosen["format_id"]
+    # Sort resolutions descending (4K first etc.)
+    available_resolutions = sorted(grouped.keys(), reverse=True)
 
-    # 3) fallback: try corresponding width
-    target_width = height_to_width.get(target_height)
-    if target_width:
-        candidates = [f for f in video_formats if f.get("width") == target_width]
-        chosen = pick_smallest(candidates)
-        if chosen:
-            return chosen["format_id"]
+    print("\nAvailable video resolutions:")
+    for idx, res in enumerate(available_resolutions, start=1):
+        print(f"  {idx}) {res}p")
 
-    # 4) fallback: largest below target height
-    candidates = [f for f in video_formats if f.get("height") <= target_height]
-    chosen = pick_smallest(candidates)
-    if chosen:
-        return chosen["format_id"]
+    print("============================================")
+    choice = input("Select resolution: ").strip()
 
-    return None
-
-
-def handle_resolution_download(url: str) -> None:
-    """
-    Let the user pick from 720p, 1080p, 4K
-    """
-    print("""
-Choose target resolution:
-  1) 720p
-  2) 1080p
-  3) 4K
-============================================
-""")
-    res_option = input("Option: ").strip()
-    if res_option == "1":
-        target_height = 720
-    elif res_option == "2":
-        target_height = 1080
-    elif res_option == "3":
-        target_height = 2160  # 4K UHD
-    else:
+    try:
+        selected_height = available_resolutions[int(choice) - 1]
+    except (IndexError, ValueError):
         print("Invalid option.")
         sys.exit(1)
 
-    formats = get_formats(url)
-    video_id = find_resolution_format(formats, target_height)
+    selected_formats = grouped[selected_height]
+    chosen_format = pick_smallest(selected_formats)
 
-    if not video_id:
-        print(f"No suitable format found for target {target_height}p.")
+    if not chosen_format:
+        print("No suitable format found for that resolution.")
         sys.exit(1)
 
-    format_string = f"{video_id}+bestaudio"
-    print(f"\n>>> Selected video format: {video_id}")
-    subprocess.run(["yt-dlp", "-f", format_string, url])
+    format_id = chosen_format["format_id"]
+    print(f"\n>>> Selected: {selected_height}p (format {format_id})")
+
+    subprocess.run(["yt-dlp", "-f", f"{format_id}+bestaudio", url])
 
 
 def handle_subtitles(url: str) -> None:
@@ -132,11 +111,12 @@ def main():
 Choose video/audio option:
   1) Best audio
   2) Best video + audio
-  3) Choose predefined resolution from list (Recommended)
+  3) Choose from resolution list (Recommended)
   4) Choose format manually
   5) No, I just want subtitles
 ============================================
 """)
+
     option = input("Option: ").strip()
 
     if option == "1":
@@ -146,7 +126,7 @@ Choose video/audio option:
         subprocess.run(["yt-dlp", "-f", "bestvideo+bestaudio", url])
 
     elif option == "3":
-        handle_resolution_download(url)
+        handle_dynamic_resolution_download(url)
 
     elif option == "4":
         fmt = input("Enter format code exactly (e.g., 251+137): ").strip()
