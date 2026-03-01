@@ -18,7 +18,7 @@ def get_video_info(url: str) -> Dict:
 def get_video_formats(info: Dict) -> List[Dict]:
     return [
         f for f in info["formats"]
-        if f.get("vcodec") != "none" and f.get("format_note")
+        if f.get("vcodec") != "none" and f.get("acodec") == "none" and f.get("format_note")
     ]
 
 
