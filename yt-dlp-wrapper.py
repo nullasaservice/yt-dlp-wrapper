@@ -18,14 +18,14 @@ def get_video_info(url: str) -> Dict:
 def get_video_formats(info: Dict) -> List[Dict]:
     return [
         f for f in info["formats"]
-        if f.get("vcodec") != "none" and f.get("height")
+        if f.get("vcodec") != "none" and f.get("format_note")
     ]
 
 
 def group_by_resolution(formats: List[Dict]) -> Dict[int, List[Dict]]:
     resolutions = {}
     for f in formats:
-        h = f["height"]
+        h = int(f["format_note"][:-1])
         resolutions.setdefault(h, []).append(f)
     return resolutions
 
