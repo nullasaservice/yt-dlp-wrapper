@@ -25,7 +25,7 @@ def get_video_formats(info: Dict) -> List[Dict]:
 def group_by_resolution(formats: List[Dict]) -> Dict[int, List[Dict]]:
     resolutions = {}
     for f in formats:
-        h = int(f["format_note"][:-1])
+        h = int(f["format_note"].split("p")[0])
         resolutions.setdefault(h, []).append(f)
     return resolutions
 
